@@ -16,6 +16,27 @@ class Task:
         Marks the task as successfully completed.
         """
         self._is_complete = True
+         # For recurring tasks, signal that a new instance should be created
+        return self._frequency.lower() in ("daily", "weekly")
+    
+    def next_occurrence_time(self) -> Optional[datetime]:
+        """
+        Calculate the next occurrence datetime for recurring tasks.
+
+        Returns:
+            Optional[datetime]: The datetime for the next occurrence, or None if
+            the task is not recurring.
+        """
+        freq = self._frequency.lower()
+        if freq == "daily":
+            # Today + 1 day at the same time of day
+            return self._time + timedelta(days=1)
+        elif freq == "weekly":
+            # Today + 1 week at the same time of day
+            return self._time + timedelta(weeks=1)
+        else:
+            return None
+
 
     def description(self) -> str:
         """
@@ -79,6 +100,31 @@ class Task:
             datetime: The calculated end time of the task.
         """
         return self._time + timedelta(minutes=self._duration_minutes)
+    
+    def occurs_on(self, target_date: date) -> bool:
+        """Return True if this task should be considered for target_date."""
+        task_date = self._time.date()
+        if self._frequency == "Once":
+            return task_date == target_date
+        if self._frequency == "Daily":
+            # After the original start date, every day
+            return target_date >= task_date
+        if self._frequency == "Weekly":
+            # Same weekday, on/after the original date
+            return (
+                target_date >= task_date
+                and target_date.weekday() == task_date.weekday()
+            )
+        # Fallback: treat unknown frequency as "Once"
+        return task_date == target_date
+
+    def occurrence_time_on(self, target_date: date) -> datetime:
+        """
+        Return the datetime this task would have on target_date,
+        preserving the original time-of-day.
+        """
+        base_time = self._time.time()
+        return datetime.combine(target_date, base_time)
 
 @dataclass
 class Pet:
@@ -121,6 +167,11 @@ class Pet:
             str: The pet's species (e.g., 'Dog', 'Cat').
         """
         return self._species
+    
+    def get_tasks_sorted(self) -> List[Task]:
+        """Return this pet's tasks sorted by time (and priority)."""
+        return sorted(self._tasks, key=lambda t: (t.time(), -t.priority()))
+    
 
 @dataclass
 class Owner:
@@ -165,30 +216,35 @@ class Owner:
             List[Pet]: A list of the owner's pets.
         """
         return list(self._pets)
+    
+
 
 @dataclass
 class Scheduler:
     _owner: Owner
 
+    
     def get_today_schedule(
         self,
         target_date: date,
         available_minutes: Optional[int] = None,
+        tasks: Optional[List[Task]] = None,
     ) -> List[Task]:
-        """
-        Retrieves, filters, sorts, and budgets tasks for a specific date.
+        tasks_source = tasks if tasks is not None else self._owner.get_all_tasks()
 
-        Args:
-            target_date (date): The specific date to retrieve tasks for.
-            available_minutes (Optional[int], optional): The maximum time budget in minutes. Defaults to None.
-
-        Returns:
-            List[Task]: A list of scheduled tasks fitting the constraints.
-        """
         day_tasks: List[Task] = []
-        for task in self._owner.get_all_tasks():
-            if task.time().date() == target_date:
-                day_tasks.append(task)
+        for task in tasks_source:
+            if task.occurs_on(target_date):
+                # Create a shallow copy with today's datetime
+                occurrence = Task(
+                    _description=task.description(),
+                    _time=task.occurrence_time_on(target_date),
+                    _frequency=task.frequency(),
+                    _duration_minutes=task.duration_minutes(),
+                    _priority=task.priority(),
+                    _is_complete=task.is_complete(),
+                )
+                day_tasks.append(occurrence)
 
         sorted_tasks = self.sort_by_time_and_priority(day_tasks)
 
@@ -197,13 +253,14 @@ class Scheduler:
 
         chosen: List[Task] = []
         remaining = available_minutes
-        for task in sorted_tasks:
-            if task.duration_minutes() <= remaining:
-                chosen.append(task)
-                remaining -= task.duration_minutes()
+        for t in sorted_tasks:
+            if t.duration_minutes() <= remaining:
+                chosen.append(t)
+                remaining -= t.duration_minutes()
             else:
                 break
         return chosen
+
 
     def sort_by_time(self, tasks: List[Task]) -> List[Task]:
         """
@@ -215,29 +272,91 @@ class Scheduler:
         Returns:
             List[Task]: The chronologically sorted list of tasks.
         """
-        return sorted(tasks, key=lambda t: t.time())
+        return sorted(tasks, key=lambda t: t.time().strftime("%H:%M"))
+
+    # def sort_by_time_and_priority(self, tasks: List[Task]) -> List[Task]:
+    #     """
+    #     Sorts tasks by time, and resolves ties using priority (highest first).
+
+    #     Args:
+    #         tasks (List[Task]): The list of tasks to sort.
+
+    #     Returns:
+    #         List[Task]: The sorted list of tasks.
+    #     """
+    #     return sorted(tasks, key=lambda t: (t.time(), -t.priority()))
+
+    # python
 
     def sort_by_time_and_priority(self, tasks: List[Task]) -> List[Task]:
+        return sorted(tasks, key=lambda t: (t.time(), -t.priority(), -t.duration_minutes()))
+
+    # def check_conflicts(self, tasks: List[Task]) -> List[Task]:
+    #     """
+    #     Detects tasks that start at the exact same time.
+
+    #     Args:
+    #         tasks (List[Task]): The list of tasks to check for conflicts.
+
+    #     Returns:
+    #         List[Task]: A list of tasks that have scheduling conflicts.
+    #     """
+    #     if not tasks:
+    #         return []
+
+    #     sorted_tasks = self.sort_by_time(tasks)
+    #     conflicts: List[Task] = []
+
+    #     for i in range(len(sorted_tasks) - 1):
+    #         current = sorted_tasks[i]
+    #         nxt = sorted_tasks[i + 1]
+    #         if current.time() == nxt.time():
+    #             if current not in conflicts:
+    #                 conflicts.append(current)
+    #             if nxt not in conflicts:
+    #                 conflicts.append(nxt)
+
+    #     return conflicts
+    def filter_tasks(
+        self,
+        tasks: List[Task],
+        completed: Optional[bool] = None,
+        pet_name: Optional[str] = None,
+    ) -> List[Task]:
         """
-        Sorts tasks by time, and resolves ties using priority (highest first).
+        Filter tasks by completion status and/or pet name.
 
         Args:
-            tasks (List[Task]): The list of tasks to sort.
+            tasks: List of tasks to filter.
+            completed: True -> only completed; False -> only incomplete; None -> ignore.
+            pet_name: If set, only tasks belonging to this pet name.
 
         Returns:
-            List[Task]: The sorted list of tasks.
+            List[Task]: Filtered tasks.
         """
-        return sorted(tasks, key=lambda t: (t.time(), -t.priority()))
+        filtered = tasks
+
+        if completed is not None:
+            filtered = [t for t in filtered if t.is_complete() == completed]
+
+        if pet_name is not None:
+            # Collect tasks for the given pet name
+            pet_tasks: List[Task] = []
+            for pet in self._owner.pets():
+                if pet.name() == pet_name:
+                    pet_tasks.extend(pet.get_tasks())
+
+            # Keep only tasks that are in that pet's task list
+            filtered = [t for t in filtered if t in pet_tasks]
+
+        return filtered
 
     def check_conflicts(self, tasks: List[Task]) -> List[Task]:
         """
-        Detects tasks that start at the exact same time.
+        Lightweight conflict detection.
 
-        Args:
-            tasks (List[Task]): The list of tasks to check for conflicts.
-
-        Returns:
-            List[Task]: A list of tasks that have scheduling conflicts.
+        Detect tasks that overlap in time (for same or different pets).
+        Returns a list of tasks that are in conflict. Does not raise errors.
         """
         if not tasks:
             return []
@@ -248,10 +367,53 @@ class Scheduler:
         for i in range(len(sorted_tasks) - 1):
             current = sorted_tasks[i]
             nxt = sorted_tasks[i + 1]
-            if current.time() == nxt.time():
+
+            # Overlap if next starts before the current one ends
+            if nxt.time() < current.end_time():
                 if current not in conflicts:
                     conflicts.append(current)
                 if nxt not in conflicts:
                     conflicts.append(nxt)
 
         return conflicts
+    
+   
+    def mark_task_complete(self, task: Task) -> Optional[Task]:
+        """
+        Mark a task complete and, if it is recurring (daily/weekly),
+        create and attach a new Task instance for the next occurrence.
+
+        Args:
+            task: The Task instance to mark as complete.
+
+        Returns:
+            Optional[Task]: The newly created recurring Task, or None if no
+            follow-up was created.
+        """
+        # Mark the original task complete
+        should_repeat = task.mark_complete()
+
+        if not should_repeat:
+            return None
+
+        next_time = task.next_occurrence_time()
+        if next_time is None:
+            return None
+
+        # Create the next occurrence task
+        new_task = Task(
+            _description=task.description(),
+            _time=next_time,
+            _frequency=task.frequency(),
+            _duration_minutes=task.duration_minutes(),
+            _priority=task.priority(),
+            _is_complete=False,
+        )
+
+        # Attach to the same pet that owns the original task
+        for pet in self._owner.pets():
+            if task in pet.get_tasks():
+                pet.add_task(new_task)
+                break
+
+        return new_task

@@ -34,14 +34,32 @@ In my initial UML, I kept simpler tasks and a scheduler that only sorted and fla
 **a. Constraints and priorities**
 
 - What constraints does your scheduler consider (for example: time, priority, preferences)?
+
+The scheduler considers several primary constraints:
+
+- **Chronological time** – Tasks are filtered by a specific date and sorted by their start time.
+- **Priority** – An integer scale (1–5) is used as a secondary sort key so higher‑priority tasks at the same time are chosen first.
+- **Time budget** – An optional `available_minutes` limit is compared against each task’s `duration_minutes`, and tasks are added greedily until the budget is exhausted.
+- **Conflicts** – The scheduler performs lightweight conflict detection by checking for overlapping time windows (based on `time` and `end_time`), and surfaces warnings instead of crashing or auto‑rescheduling.
+- **Recurrence** – For “Daily” and “Weekly” tasks, when a task is marked complete, a new instance is created for the next occurrence using `timedelta`, so recurring care continues automatically.
+- **Filtering** – Tasks can be filtered by completion status or pet name in the scheduler, and the UI supports viewing all pets or a single pet’s schedule.
+
 - How did you decide which constraints mattered most?
+
+I decided to sort by time first because pet care follows a daily routine (e.g., morning walks before afternoon play). Priority is used as a tie‑breaker so that, when time slots collide, more important tasks are favored. The time budget is a practical constraint so the app doesn’t plan more than the owner can realistically do in a day. Conflict checks and recurrence are layered on top: conflicts are surfaced as warnings (so the user stays in control), and recurring tasks are regenerated so that daily and weekly care tasks don’t disappear after one completion.
 
 **b. Tradeoffs**
 
 - Describe one tradeoff your scheduler makes.
+
+The main tradeoff is that the scheduler uses a **greedy chronological time‑budget strategy** rather than an optimal packing algorithm (like knapsack). It processes tasks in sorted order (time, then priority) and includes each task as long as there is enough remaining time. It does not try to “rearrange” or skip an early, long task in order to squeeze in multiple shorter tasks later.
+
+Another tradeoff is that **conflict handling is advisory**, not automatic. The system detects overlapping tasks and returns them as warnings, but it does not attempt to move or resolve them on its own.
+
 - Why is that tradeoff reasonable for this scenario?
 
----
+This is reasonable because pet care is inherently time‑sensitive. It’s usually not acceptable to skip or delay an 8:00 AM feeding just because that might yield a mathematically better time packing later in the day. Chronological realism and clarity are more important than theoretical optimality. Similarly, raising warnings instead of auto‑rescheduling keeps the owner in control of important commitments like vet visits or medication times, and keeps the logic simple and predictable for a busy user.
+
 
 ## 3. AI Collaboration
 

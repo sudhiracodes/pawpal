@@ -51,3 +51,22 @@ PawPal+ now includes smarter scheduling features to make daily planning more use
 - **Recurring Tasks** – Daily and weekly tasks automatically generate a new instance for the next occurrence when marked complete.
 - **Conflict Detection** – Lightweight conflict checks warn when two tasks overlap in time (for the same or different pets), without stopping the app.
 - **Task Filtering** – Tasks can be filtered by completion status or by pet name in the scheduler logic, enabling focused views and reports.
+
+## Testing PawPal+
+
+To run the automated test suite, use:
+
+```bash
+python -m pytest
+```
+
+The current tests cover:
+* Core `Task` behavior (creation and completion).
+* Adding tasks to a `Pet`.
+* Scheduler sorting logic to ensure tasks are ordered chronologically and by priority.
+* Recurring task handling for daily tasks (creating the next day’s task on completion).
+* Conflict detection for overlapping tasks.
+
+**Confidence Level:** ⭐⭐⭐☆☆ (3/5)
+
+The suite validates key happy paths and several edge cases, but broader coverage (e.g., weekly recurrences, filtering combinations, and more complex schedules) would be needed for higher confidence.
